@@ -3,242 +3,114 @@ import random
 import copy
 
 import networkx as nx
-import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt #biblioteca de plotare
+
+#1. Creearea grafului
+
+G = nx.Graph() #creearea grafului
+us_airports = set() #set pentru a retine aeroporturile din US; folosim pentru routes
+
+with open("airports.dat.txt", "r", encoding="utf-8") as f:
+
+    for line in f:
+        splited_line = line.strip().split(",")
+        airport_code = splited_line[4].strip().replace('"','') #de ex "GKA" devine GKA (fara ghilimele)
+        airport_name = splited_line[1].strip().replace('"','') 
+        airport_country = splited_line[3].strip().replace('"', '')
+        if airport_country == "United States" and airport_code!="\\N": 
+            G.add_node(airport_code, name=airport_name, country=airport_country)
+            us_airports.add(airport_code) #adaugam aeroportul in set 
+
+with open("routes.dat.txt","r", encoding="utf-8") as f:
+    for line in f:
+        splited_line = line.strip().split(",")
+        origin = splited_line[2].strip().replace('"', '')
+        destination = splited_line[4].strip().replace('"', '')
+
+        if len(splited_line)>=4 and origin in us_airports and destination in us_airports: #ne asiguram ca route e in US
+            G.add_edge(origin,destination)
 
 
-##################################################
-# PASUL 1 - CITIM AEROPORTURILE
-##################################################
+print("Number nodes:", G.number_of_nodes())
+print("Number edges:", G.number_of_edges())
 
-airports = {}
+#2. Central betweeness-hubs
 
-with open("airports.dat.txt", encoding="utf-8") as f:
+centrality = nx.betweenness_centrality(G) #se returneaza un dictionar, cheile sunt nodurile, valorile sunt betweenness centrality
 
-    reader = csv.reader(f)
+hubs = sorted(centrality.items(), key = lambda x: x[1], reverse=True)[:5] #sortam descrescator dupa valoare si pastram doar primele 5 elemente (primele 5 hub-uri)
 
-    for row in reader:
+for hub in hubs:
+    print(hub)
 
-        airport_id = row[0]
-        iata = row[4]
-        country = row[3]
+#nush daca e nevoie de graficul asta 
 
-        # pastram doar aeroporturile din SUA
-        if country == "United States" and iata != "\\N":
+# values = list(centrality.values())
 
-            airports[airport_id] = iata
+# plt.hist(values, bins=1000) #grupeaza valorile pe intervale; 50 de aeroporturi
+# plt.xlabel("Betweenness Centrality") #pe axa x "Betweenness Centrality"
+# plt.ylabel("Number Airports") #pe aza y
+# plt.title("Betweennes Centrality Analysis")
+# plt.show() #se afiseaza histograma; foarte multe aeroporturi-betweennes~0, putine-betweenness mare-> scale-free structure (cred)
 
+#3.Attack+Load redistribution
 
-print("Numar aeroporturi US:", len(airports))
+load = nx.betweenness_centrality(G, normalized=True)
 
+alpha = 1.2
+capacity = {n: alpha * load[n] for n in G.nodes()}  
 
-##################################################
-# PASUL 2 - CONSTRUIM GRAFUL
-##################################################
+initial_nodes = G.number_of_nodes()
+G_temp = G.copy()
+G_temp.remove_node("DEN")
 
-G = nx.Graph()
+print("Removed hub:", "DEN")
 
-with open("routes.dat.txt", encoding="utf-8") as f:
+nodes_over_time = []  #pt grafic
+iteration = 0
 
-    reader = csv.reader(f)
+while True:
+    iteration += 1
+    load = nx.betweenness_centrality(G_temp, normalized=True)  #daca stergem un nod, se face redistribuirea si load e recalculat
 
-    for row in reader:
+    failed = []  #nodurile care au load>capacitatea
+    for n in G_temp.nodes():
+        if load[n] > capacity[n]:
+            failed.append(n)
 
-        if len(row) < 6:
-            continue
+    nodes_over_time.append(G_temp.number_of_nodes()) #pt grafic, retine cate noduri mai sunt la fiecare iteratie
 
-        source_id = row[3]
-        destination_id = row[5]
+    if not failed:  #daca nu mai cade niciun nod, iesim din while
+        break
 
-        if source_id in airports and destination_id in airports:
+    G_temp.remove_nodes_from(failed)
 
-            source = airports[source_id]
-            destination = airports[destination_id]
+nodes_over_time.append(G_temp.number_of_nodes())
 
-            G.add_edge(source, destination)
+print("Final nodes:",G_temp.number_of_nodes())
 
+print("Failed airports:",initial_nodes - G_temp.number_of_nodes())
 
-print("Numar noduri:", G.number_of_nodes())
-print("Numar muchii:", G.number_of_edges())
-
-
-##################################################
-# PASUL 3 - GASIM HUB-URILE
-##################################################
-
-degrees = dict(G.degree())
-
-top_hubs = sorted(
-    degrees.items(),
-    key=lambda x: x[1],
-    reverse=True
+largest_component = max(   # Largest Connected Component (S)
+    nx.connected_components(G_temp),
+    key=len
 )
 
-print("\nTop 10 hub-uri:\n")
+S = len(largest_component)
+print("Largest component size:", S)
+print("Normalized S:",S / initial_nodes)
 
-for airport, degree in top_hubs[:10]:
+E_before = nx.global_efficiency(G)
+E_after = nx.global_efficiency(G_temp)
 
-    print(airport, degree)
+print("Efficiency before:",E_before)
+print("Efficiency after:",E_after)
 
+plt.plot(nodes_over_time, marker='o')  #marker pune cerculet in fiecare punct
 
-##################################################
-# PASUL 4 - FUNCTIE PENTRU LCC
-##################################################
-
-def largest_component_ratio(graph):
-
-    if graph.number_of_nodes() == 0:
-        return 0
-
-    largest_cc = max(
-        nx.connected_components(graph),
-        key=len
-    )
-
-    return len(largest_cc) / graph.number_of_nodes()
-
-
-##################################################
-# PASUL 5 - RANDOM FAILURES
-##################################################
-
-def random_attack(graph, percent):
-
-    H = graph.copy()
-
-    remove_count = int(
-        percent * H.number_of_nodes()
-    )
-
-    nodes = list(H.nodes())
-
-    removed = random.sample(
-        nodes,
-        remove_count
-    )
-
-    H.remove_nodes_from(removed)
-
-    return largest_component_ratio(H)
-
-
-##################################################
-# PASUL 6 - TARGETED ATTACK
-##################################################
-
-def targeted_attack(graph, percent):
-
-    H = graph.copy()
-
-    remove_count = int(
-        percent * H.number_of_nodes()
-    )
-
-    degrees = sorted(
-        H.degree(),
-        key=lambda x: x[1],
-        reverse=True
-    )
-
-    hubs = [
-        node
-        for node, degree in degrees[:remove_count]
-    ]
-
-    H.remove_nodes_from(hubs)
-
-    return largest_component_ratio(H)
-
-
-##################################################
-# PASUL 7 - EXPERIMENTE
-##################################################
-
-percentages = [
-    0.01,
-    0.05,
-    0.10,
-    0.15,
-    0.20,
-    0.25
-]
-
-random_results = []
-targeted_results = []
-
-for p in percentages:
-
-    random_score = random_attack(
-        G,
-        p
-    )
-
-    targeted_score = targeted_attack(
-        G,
-        p
-    )
-
-    random_results.append(
-        random_score
-    )
-
-    targeted_results.append(
-        targeted_score
-    )
-
-    print(
-        f"{int(p*100)}% removed"
-    )
-
-    print(
-        f"Random: {random_score:.3f}"
-    )
-
-    print(
-        f"Targeted: {targeted_score:.3f}"
-    )
-
-    print()
-
-
-##################################################
-# PASUL 8 - GRAFIC
-##################################################
-
-x = [
-    p * 100
-    for p in percentages
-]
-
-plt.figure(figsize=(8, 5))
-
-plt.plot(
-    x,
-    random_results,
-    marker="o",
-    label="Random failures"
-)
-
-plt.plot(
-    x,
-    targeted_results,
-    marker="s",
-    label="Targeted attacks"
-)
-
-plt.xlabel(
-    "Percentage of removed airports"
-)
-
-plt.ylabel(
-    "Largest Connected Component"
-)
-
-plt.title(
-    "Resilience of US Air Transportation Network"
-)
-
-plt.legend()
-
-plt.grid(True)
+plt.xlabel("Iteration")
+plt.ylabel("Remaining nodes")
+plt.title(f"Cascade failure after removing DEN")
+plt.grid(True)  #chestie de design
 
 plt.show()
