@@ -1,116 +1,119 @@
-import csv
-import random
-import copy
-
 import networkx as nx
 import matplotlib.pyplot as plt #biblioteca de plotare
+import random
 
-#1. Creearea grafului
+#1. Create graph
+def create_graph():
+    G = nx.Graph() #creearea grafului
+    us_airports = set() #set pentru a retine aeroporturile din US; folosim pentru routes
 
-G = nx.Graph() #creearea grafului
-us_airports = set() #set pentru a retine aeroporturile din US; folosim pentru routes
+    with open("airports.dat.txt", "r", encoding="utf-8") as f:
 
-with open("airports.dat.txt", "r", encoding="utf-8") as f:
+        for line in f:
+            splited_line = line.strip().split(",")
+            airport_code = splited_line[4].strip().replace('"','') #de ex "GKA" devine GKA (fara ghilimele)
+            airport_name = splited_line[1].strip().replace('"','') 
+            airport_country = splited_line[3].strip().replace('"', '')
+            if airport_country == "United States" and airport_code!="\\N": 
+                G.add_node(airport_code, name=airport_name, country=airport_country)
+                us_airports.add(airport_code) #adaugam aeroportul in set 
 
-    for line in f:
-        splited_line = line.strip().split(",")
-        airport_code = splited_line[4].strip().replace('"','') #de ex "GKA" devine GKA (fara ghilimele)
-        airport_name = splited_line[1].strip().replace('"','') 
-        airport_country = splited_line[3].strip().replace('"', '')
-        if airport_country == "United States" and airport_code!="\\N": 
-            G.add_node(airport_code, name=airport_name, country=airport_country)
-            us_airports.add(airport_code) #adaugam aeroportul in set 
+    with open("routes.dat.txt","r", encoding="utf-8") as f:
+        for line in f:
+            splited_line = line.strip().split(",")
+            origin = splited_line[2].strip().replace('"', '')
+            destination = splited_line[4].strip().replace('"', '')
 
-with open("routes.dat.txt","r", encoding="utf-8") as f:
-    for line in f:
-        splited_line = line.strip().split(",")
-        origin = splited_line[2].strip().replace('"', '')
-        destination = splited_line[4].strip().replace('"', '')
-
-        if len(splited_line)>=4 and origin in us_airports and destination in us_airports: #ne asiguram ca route e in US
-            G.add_edge(origin,destination)
-
-
-print("Number nodes:", G.number_of_nodes())
-print("Number edges:", G.number_of_edges())
+            if len(splited_line)>=4 and origin in us_airports and destination in us_airports: #ne asiguram ca route e in US
+                G.add_edge(origin,destination)
+    
+    return G
 
 #2. Central betweeness-hubs
 
-centrality = nx.betweenness_centrality(G) #se returneaza un dictionar, cheile sunt nodurile, valorile sunt betweenness centrality
-
-hubs = sorted(centrality.items(), key = lambda x: x[1], reverse=True)[:5] #sortam descrescator dupa valoare si pastram doar primele 5 elemente (primele 5 hub-uri)
-
-for hub in hubs:
-    print(hub)
-
-#nush daca e nevoie de graficul asta 
-
-# values = list(centrality.values())
-
-# plt.hist(values, bins=1000) #grupeaza valorile pe intervale; 50 de aeroporturi
-# plt.xlabel("Betweenness Centrality") #pe axa x "Betweenness Centrality"
-# plt.ylabel("Number Airports") #pe aza y
-# plt.title("Betweennes Centrality Analysis")
-# plt.show() #se afiseaza histograma; foarte multe aeroporturi-betweennes~0, putine-betweenness mare-> scale-free structure (cred)
+def find_hubs(G):
+    centrality = nx.betweenness_centrality(G) #se returneaza un dictionar, cheile sunt nodurile, valorile sunt betweenness centrality
+    hubs = sorted(centrality.items(), key = lambda x: x[1], reverse=True)[:10] #sortam descrescator dupa valoare si pastram doar primele 10 elemente (primele 10 hub-uri)
+    return hubs
 
 #3.Attack+Load redistribution
 
-load = nx.betweenness_centrality(G, normalized=True)
+def attack(G, node, alpha):
 
-alpha = 1.2
-capacity = {n: alpha * load[n] for n in G.nodes()}  
+    load = nx.betweenness_centrality(G, normalized=True)
+    capacity = {n: alpha * load[n] for n in G.nodes()}  
 
-initial_nodes = G.number_of_nodes()
-G_temp = G.copy()
-G_temp.remove_node("DEN")
+    G_temp = G.copy()
+    G_temp.remove_node(node)
 
-print("Removed hub:", "DEN")
+    print("Removed hub:", node)
 
-nodes_over_time = []  #pt grafic
-iteration = 0
+    nodes_over_time = []  #pt grafic
+    iteration = 0
 
-while True:
-    iteration += 1
-    load = nx.betweenness_centrality(G_temp, normalized=True)  #daca stergem un nod, se face redistribuirea si load e recalculat
+    while True:  #ce magie se face cu load-ul?
+        iteration += 1
+        load = nx.betweenness_centrality(G_temp, normalized=True) #!ce e normalized????  #daca stergem un nod, se face redistribuirea si load e recalculat
 
-    failed = []  #nodurile care au load>capacitatea
-    for n in G_temp.nodes():
-        if load[n] > capacity[n]:
-            failed.append(n)
+        failed = []  #nodurile care au load>capacitatea
+        for n in G_temp.nodes():
+            if load[n] > capacity[n]:
+                failed.append(n)
 
-    nodes_over_time.append(G_temp.number_of_nodes()) #pt grafic, retine cate noduri mai sunt la fiecare iteratie
+        nodes_over_time.append(G_temp.number_of_nodes()) #pt grafic, retine cate noduri mai sunt la fiecare iteratie
 
-    if not failed:  #daca nu mai cade niciun nod, iesim din while
-        break
+        if not failed:  #daca nu mai cade niciun nod, iesim din while
+            break
 
-    G_temp.remove_nodes_from(failed)
+        G_temp.remove_nodes_from(failed)
 
-nodes_over_time.append(G_temp.number_of_nodes())
+    nodes_over_time.append(G_temp.number_of_nodes())
+    
+    return G_temp, nodes_over_time
 
-print("Final nodes:",G_temp.number_of_nodes())
+def analyze_cascade(G, G_temp):
+    initial_nodes = G.number_of_nodes()
 
-print("Failed airports:",initial_nodes - G_temp.number_of_nodes())
+    print("Final nodes:",initial_nodes)
 
-largest_component = max(   # Largest Connected Component (S)
-    nx.connected_components(G_temp),
-    key=len
-)
+    print("Failed airports:",initial_nodes - G_temp.number_of_nodes())
 
-S = len(largest_component)
-print("Largest component size:", S)
-print("Normalized S:",S / initial_nodes)
+    largest_component = max(nx.connected_components(G_temp),key=len)  #????
 
-E_before = nx.global_efficiency(G)
-E_after = nx.global_efficiency(G_temp)
+    S = len(largest_component)
+    print("Largest component size:", S)
+    print("Normalized S:",S / initial_nodes)
 
-print("Efficiency before:",E_before)
-print("Efficiency after:",E_after)
+    E_before = nx.global_efficiency(G)  #????
+    E_after = nx.global_efficiency(G_temp)
 
-plt.plot(nodes_over_time, marker='o')  #marker pune cerculet in fiecare punct
+    print("Efficiency before:",E_before)
+    print("Efficiency after:",E_after)
 
-plt.xlabel("Iteration")
-plt.ylabel("Remaining nodes")
-plt.title(f"Cascade failure after removing DEN")
-plt.grid(True)  #chestie de design
+def plot_cascade(nodes_over_time, node):
+    plt.plot(nodes_over_time, marker='o')  #marker pune cerculet in fiecare punct
 
-plt.show()
+    plt.xlabel("Iteration")
+    plt.ylabel("Remaining nodes")
+    plt.title(f"Cascade failure after removing {node}")
+    plt.grid(True)
+
+    plt.show()
+
+def random_attack(G, alpha):
+    random.seed(42)  # Set a seed for reproducibilityU, whatever that means girl 
+    random_node = random.choice(list(G.nodes()))
+    return attack(G, random_node, alpha)
+
+def main():
+    G =create_graph()
+
+    G_temp, nodes_over_time = attack(G, "DEN", 1.5)
+    analyze_cascade(G, G_temp)
+    plot_cascade(nodes_over_time, "DEN")
+
+    # G_temp, nodes_over_time = random_attack(G, 1.5)
+    # analyze_cascade(G, G_temp)
+    # plot_cascade(nodes_over_time, "Random Node")
+
+main()
