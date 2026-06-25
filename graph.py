@@ -38,22 +38,22 @@ def find_hubs(G):
 
 #3.Attack+Load redistribution
 
-def attack(G, node, alpha):
+def attack(G, nodes, alpha):
 
-    load = nx.betweenness_centrality(G, normalized=True)
+    load = nx.betweenness_centrality(G) 
     capacity = {n: alpha * load[n] for n in G.nodes()}  
 
     G_temp = G.copy()
-    G_temp.remove_node(node)
+    G_temp.remove_nodes_from(nodes)
 
-    print("Removed hub:", node)
+    print("Removed nodes:", nodes)
 
     nodes_over_time = []  #pt grafic
     iteration = 0
 
-    while True:  #ce magie se face cu load-ul?
+    while True:
         iteration += 1
-        load = nx.betweenness_centrality(G_temp, normalized=True) #!ce e normalized????  #daca stergem un nod, se face redistribuirea si load e recalculat
+        load = nx.betweenness_centrality(G_temp) #!ce e normalized????  #daca stergem un nod, se face redistribuirea si load e recalculat
 
         failed = []  #nodurile care au load>capacitatea
         for n in G_temp.nodes():
@@ -71,18 +71,27 @@ def attack(G, node, alpha):
     
     return G_temp, nodes_over_time
 
+def Sandy(G, alpha):
+    return attack(G, ["JFK", "LGA", "EWR"], alpha)
+
+def Harvey(G, alpha):
+    return attack(G, ["IAH", "HOU"], alpha)
+
+def PolarVortex(G, alpha):
+    return attack(G, ["ORD", "MSP"], alpha)
+
 def analyze_cascade(G, G_temp):
     initial_nodes = G.number_of_nodes()
 
-    print("Final nodes:",initial_nodes)
+    print("Final nodes:",G_temp.number_of_nodes())
 
     print("Failed airports:",initial_nodes - G_temp.number_of_nodes())
 
-    largest_component = max(nx.connected_components(G_temp),key=len)  #????
+    largest_component = max(nx.connected_components(G_temp),key=len)  #connected_components-lista cu comp conexe, 
 
     S = len(largest_component)
     print("Largest component size:", S)
-    print("Normalized S:",S / initial_nodes)
+    print("Normalized S:",S / initial_nodes) #cat din reteaua originala se afla in cea mai mare comp conexa 
 
     E_before = nx.global_efficiency(G)  #????
     E_after = nx.global_efficiency(G_temp)
@@ -90,30 +99,59 @@ def analyze_cascade(G, G_temp):
     print("Efficiency before:",E_before)
     print("Efficiency after:",E_after)
 
-def plot_cascade(nodes_over_time, node):
+def plot_cascade(nodes_over_time, nodes):
     plt.plot(nodes_over_time, marker='o')  #marker pune cerculet in fiecare punct
 
     plt.xlabel("Iteration")
     plt.ylabel("Remaining nodes")
-    plt.title(f"Cascade failure after removing {node}")
+    plt.title(f"Cascade failure after removing {nodes}")
     plt.grid(True)
 
     plt.show()
 
+def plot_comparison(nodes_targeted, nodes_random, label_targeted, alpha):
+    plt.figure(figsize=(10, 5))
+    plt.plot(nodes_targeted, marker='o', markersize=4, color='red',   label=f"Targeted attack ({label_targeted})")
+    plt.plot(nodes_random,   marker='s', markersize=4, color='green', label="Random failure")
+
+    plt.xlabel("Iteration")
+    plt.ylabel("Remaining nodes")
+    plt.title(f"Cascade failure: Targeted vs Random (α={alpha})")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
+
 def random_attack(G, alpha):
-    random.seed(42)  # Set a seed for reproducibilityU, whatever that means girl 
+    # Set a seed for reproducibilityU, whatever that means girl 
     random_node = random.choice(list(G.nodes()))
-    return attack(G, random_node, alpha)
+    return attack(G, [random_node], alpha)
+
+
 
 def main():
     G =create_graph()
 
-    G_temp, nodes_over_time = attack(G, "DEN", 1.5)
+    G_temp, nodes_over_time1 = attack(G, ["ANC"], 1.1)
     analyze_cascade(G, G_temp)
-    plot_cascade(nodes_over_time, "DEN")
+    plot_cascade(nodes_over_time1, ["ANC"])
 
-    # G_temp, nodes_over_time = random_attack(G, 1.5)
+    # G_temp, nodes_over_time2 = random_attack(G, 1.1)
     # analyze_cascade(G, G_temp)
-    # plot_cascade(nodes_over_time, "Random Node")
+    # plot_cascade(nodes_over_time2, "Random Node")
+
+    # plot_comparison(nodes_over_time1, nodes_over_time2, "DEN", 1.2)
+
+    # G_temp, nodes_over_time = Sandy(G, 1.1)
+    # analyze_cascade(G, G_temp)
+    # plot_cascade(nodes_over_time, "Sandy")
+
+    # G_temp, nodes_over_time = Harvey(G, 1.2)
+    # analyze_cascade(G, G_temp)
+    # plot_cascade(nodes_over_time, "Harvey")
+
+    # G_temp, nodes_over_time = PolarVortex(G, 1.2)
+    # analyze_cascade(G, G_temp)
+    # plot_cascade(nodes_over_time, "PolarVortex")
 
 main()
